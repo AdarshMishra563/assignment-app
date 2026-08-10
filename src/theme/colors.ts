@@ -34,7 +34,7 @@ export const DarkTheme: ThemePalette = {
   primaryDark: '#0066CC',
   primaryGradient: ['#3797EF', '#0084FF'],
   
-  chatBubbleSender: '#0084FF',
+  chatBubbleSender: '#2563EB',
   chatBubbleReceiver: '#3A3B3C',
   
   textPrimary: '#E4E6EB',
@@ -60,7 +60,7 @@ export const LightTheme: ThemePalette = {
   primaryDark: '#0066CC',
   primaryGradient: ['#3797EF', '#0084FF'],
   
-  chatBubbleSender: '#0084FF',
+  chatBubbleSender: '#2563EB',
   chatBubbleReceiver: '#E4E6EB',
   
   textPrimary: '#050505',

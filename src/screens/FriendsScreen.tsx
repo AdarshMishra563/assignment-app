@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Search, UserPlus, UserCheck, MessageSquare, Users } from 'lucide-react-native';
-import { useAuth } from '../context/AuthContext';
+import { useAppSelector } from '../store/hooks';
 import { useSocketContext } from '../context/SocketContext';
 import { useTheme } from '../context/ThemeContext';
 import { UserAvatar } from '../components/UserAvatar';
@@ -25,7 +25,7 @@ export const FriendsScreen: React.FC<FriendsScreenProps> = ({
   onSelectChat,
   onOpenProfile,
 }) => {
-  const { user: currentUser } = useAuth();
+  const currentUser = useAppSelector((state) => state.auth.user);
   const { onlineUsers } = useSocketContext();
   const { theme } = useTheme();
 

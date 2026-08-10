@@ -1,13 +1,22 @@
 export type MessageType = 'text' | 'audio' | 'video' | 'image' | 'file';
 export type MessageStatus = 'sent' | 'delivered' | 'read';
 
+export interface ApiResponse<T = any> {
+  success: boolean;
+  message?: string;
+  error?: string;
+  data?: T;
+}
+
 export interface IUser {
   id: string;
   username: string;
   email: string;
   avatarUrl?: string;
+  fcmToken?: string;
   isOnline?: boolean;
   lastSeen?: string | Date;
+  createdAt?: string | Date;
 }
 
 export interface IMessage {
@@ -31,11 +40,12 @@ export interface IChatRoom {
   id: string;
   name?: string;
   isGroup: boolean;
-  participants: IUser[];
+  participants?: IUser[];
+  participantIds?: string[];
   lastMessage?: IMessage;
   unreadCount?: number;
-  createdAt: string | Date;
-  updatedAt: string | Date;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
 }
 
 export interface ITypingState {
@@ -60,6 +70,15 @@ export interface IVideoCallSignal {
   type: 'offer' | 'answer' | 'ice-candidate' | 'end';
 }
 
+export interface IComment {
+  id?: string;
+  userId: string;
+  username: string;
+  userAvatar?: string;
+  text: string;
+  createdAt?: string | Date;
+}
+
 export interface IPost {
   id: string;
   userId: string;
@@ -69,7 +88,10 @@ export interface IPost {
   type: 'image' | 'video' | 'text';
   mediaUrl?: string;
   thumbnailUrl?: string;
-  likes: string[];
-  commentsCount: number;
-  createdAt: string;
+  likes?: string[];
+  comments?: IComment[];
+  commentsCount?: number;
+  createdAt: string | Date;
+  updatedAt?: string | Date;
 }
+

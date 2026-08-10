@@ -14,7 +14,8 @@ import { LogOut, Plus, Search, MessageSquarePlus, Users, Sun, Moon } from 'lucid
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { logout } from '../store/slices/authSlice';
 import { toggleTheme } from '../store/slices/themeSlice';
-import { useSocketContext } from '../context/SocketContext';
+import { useFocusEffect } from '@react-navigation/native';
+import { fetchChats, markRoomRead } from '../store/slices/chatSlice';
 import { UserAvatar } from '../components/UserAvatar';
 import { IChatRoom, IUser } from '../types';
 import { apiClient } from '../api/client';
@@ -29,9 +30,22 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onSelectChat, onOpenProf
   const dispatch = useAppDispatch();
   const user = useAppSelector((state) => state.auth.user);
   const isDark = useAppSelector((state) => state.theme.isDark);
-  const { onlineUsers } = useSocketContext();
 
-  const [chats, setChats] = useState<IChatRoom[]>([]);
+  // Presence comes from Redux, not SocketContext. SocketContext derives its
+  // user from AuthContext, which the Redux login flow never populates — so its
+  // socket (and therefore its onlineUsers map) stays empty after signing in.
+  const onlineUsersMap = useAppSelector((state) => state.presence.onlineUsers);
+  const onlineUsers = React.useMemo(
+    () => ({ get: (id?: string) => (id ? !!onlineUsersMap[id] : false) }),
+    [onlineUsersMap]
+  );
+
+  // Chats live in Redux so the socket bridge, the tab badge and this list all
+  // read the same data. Keeping a private copy here meant incoming messages
+  // updated one and not the others.
+  const chats = useAppSelector((state) => state.chat.chats);
+  const loadingChats = useAppSelector((state) => state.chat.loadingChats);
+
   const [usersList, setUsersList] = useState<IUser[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [showNewChatModal, setShowNewChatModal] = useState<boolean>(false);
@@ -43,64 +57,50 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onSelectChat, onOpenProf
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [creatingGroup, setCreatingGroup] = useState(false);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadUsers = async () => {
     try {
-      const [chatsRes, usersRes] = await Promise.all([
-        apiClient.get('/chats'),
-        apiClient.get('/users')
-      ]);
-
-      // Sort chats by most recent message first
-      const rawChats: IChatRoom[] = chatsRes.data.data || [];
-      rawChats.sort((a, b) => {
-        const timeA = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : new Date(a.updatedAt).getTime();
-        const timeB = b.lastMessage ? new Date(b.lastMessage.createdAt).getTime() : new Date(b.updatedAt).getTime();
-        return timeB - timeA;
-      });
-      setChats(rawChats);
+      const usersRes = await apiClient.get('/users');
       setUsersList(usersRes.data.data || []);
     } catch (err) {
-      console.error('Failed to load chats or users:', err);
+      console.error('Failed to load users:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const { socket } = useSocketContext();
-
   useEffect(() => {
-    loadData();
+    loadUsers();
   }, []);
 
-  useEffect(() => {
-    if (!socket) return;
+  // Re-pull chats every time the Chats tab is focused, so switching back always
+  // shows conversations that arrived while the user was on another tab (and
+  // covers anything the socket missed while backgrounded).
+  useFocusEffect(
+    React.useCallback(() => {
+      dispatch(fetchChats());
+    }, [dispatch])
+  );
 
-    const handleNewMessage = (newMsg: any) => {
-      setChats((prevChats) => {
-        const chatIndex = prevChats.findIndex((c) => c.id === newMsg.roomId);
-        if (chatIndex !== -1) {
-          const targetChat = {
-            ...prevChats[chatIndex],
-            lastMessage: newMsg,
-            updatedAt: newMsg.createdAt,
-            unreadCount: (prevChats[chatIndex].unreadCount || 0) + (newMsg.senderId !== user?.id ? 1 : 0)
-          };
-          const remainingChats = prevChats.filter((c) => c.id !== newMsg.roomId);
-          return [targetChat, ...remainingChats];
-        }
-        return prevChats;
-      });
-    };
+  // Live updates (new message, new room) arrive through the socket -> Redux
+  // bridge in services/socketReduxBridge.ts, which keeps state.chat.chats
+  // ordered and unread-counted. No local socket wiring needed here.
 
-    socket.on('message:received', handleNewMessage);
-    socket.on('receive_message', handleNewMessage);
+  const sortedChats = React.useMemo(() => {
+    return [...chats].sort((a, b) => {
+      const timeA = a.lastMessage?.createdAt
+        ? new Date(a.lastMessage.createdAt).getTime()
+        : a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const timeB = b.lastMessage?.createdAt
+        ? new Date(b.lastMessage.createdAt).getTime()
+        : b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      return timeB - timeA;
+    });
+  }, [chats]);
 
-    return () => {
-      socket.off('message:received', handleNewMessage);
-      socket.off('receive_message', handleNewMessage);
-    };
-  }, [socket, user?.id]);
+  const handleOpenChat = (room: IChatRoom) => {
+    dispatch(markRoomRead(room.id));
+    onSelectChat(room);
+  };
 
   const handleStartChat = async (targetUser: IUser) => {
     try {
@@ -140,6 +140,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onSelectChat, onOpenProf
     try {
       const res = await apiClient.post('/chats/group', {
         name: groupName.trim(),
+        memberIds: selectedUserIds,
         participantIds: selectedUserIds,
         avatarUrl: `https://api.dicebear.com/7.x/identicon/png?seed=${encodeURIComponent(groupName)}`,
       });
@@ -168,9 +169,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onSelectChat, onOpenProf
     }
   };
 
-  const formatChatTime = (dateStr: string | Date) => {
+  const formatChatTime = (dateStr?: string | Date) => {
+    if (!dateStr) return '';
     try {
       const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '';
       const now = new Date();
       const diffMs = now.getTime() - d.getTime();
       const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
@@ -182,28 +185,69 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onSelectChat, onOpenProf
   };
 
   const renderChatItem = ({ item }: { item: IChatRoom }) => {
-    const otherParticipant = item.participants.find((p) => p.id !== user?.id);
-    const roomTitle = item.isGroup ? item.name : (otherParticipant?.username || 'Chat');
-    const avatarUrl = otherParticipant?.avatarUrl;
-    const isOnline = otherParticipant ? onlineUsers.get(otherParticipant.id) : false;
+    const participantsList = item.participants || [];
+    const otherParticipant = participantsList.find((p) => p.id !== user?.id);
+    const roomTitle = item.isGroup ? (item.name || 'Group') : (otherParticipant?.username || 'Chat');
+
+    // A group used to borrow whichever member happened to be first in the
+    // participant array, so every group wore a random person's face.
+    const avatarUrl = item.isGroup
+      ? `https://api.dicebear.com/7.x/identicon/png?seed=${encodeURIComponent(item.name || item.id)}`
+      : otherParticipant?.avatarUrl;
+
+    const isOnline = item.isGroup
+      ? false
+      : otherParticipant
+        ? onlineUsers.get(otherParticipant.id)
+        : false;
+
     const hasUnread = (item.unreadCount || 0) > 0;
 
+    // Groups need to say who is in them and who wrote the last line.
+    const memberNames = participantsList
+      .map((p) => (p.id === user?.id ? 'You' : p.username))
+      .join(', ');
+
+    const lastSenderLabel =
+      item.isGroup && item.lastMessage
+        ? item.lastMessage.senderId === user?.id
+          ? 'You: '
+          : `${item.lastMessage.senderName || 'Member'}: `
+        : '';
+
     return (
-      <TouchableOpacity style={styles.chatCard} onPress={() => onSelectChat(item)}>
-        <TouchableOpacity onPress={() => otherParticipant && onOpenProfile?.(otherParticipant.id)}>
+      <TouchableOpacity style={styles.chatCard} onPress={() => handleOpenChat(item)}>
+        <TouchableOpacity
+          onPress={() => !item.isGroup && otherParticipant && onOpenProfile?.(otherParticipant.id)}
+        >
           <UserAvatar name={roomTitle || 'C'} uri={avatarUrl} size={48} isOnline={isOnline} />
         </TouchableOpacity>
 
         <View style={styles.chatDetails}>
           <View style={styles.chatHeaderRow}>
-            <Text style={[styles.chatTitle, hasUnread && { fontWeight: '800' }]} numberOfLines={1}>{roomTitle}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+              {item.isGroup && <Users size={13} color={Colors.textMuted} />}
+              <Text
+                style={[styles.chatTitle, hasUnread && { fontWeight: '800' }, { flexShrink: 1 }]}
+                numberOfLines={1}
+              >
+                {roomTitle}
+              </Text>
+              {item.isGroup && (
+                <Text style={styles.memberCountText}>{participantsList.length}</Text>
+              )}
+            </View>
             <Text style={[styles.chatTime, hasUnread && { color: Colors.primary, fontWeight: '700' }]}>
               {item.lastMessage ? formatChatTime(item.lastMessage.createdAt) : ''}
             </Text>
           </View>
 
           <View style={styles.chatPreviewRow}>
-            <Text style={[styles.lastMessageText, hasUnread && { color: Colors.textPrimary, fontWeight: '600' }]} numberOfLines={1}>
+            <Text
+              style={[styles.lastMessageText, hasUnread && { color: Colors.textPrimary, fontWeight: '600' }]}
+              numberOfLines={1}
+            >
+              {lastSenderLabel}
               {getMessagePreview(item.lastMessage)}
             </Text>
             {hasUnread && (
@@ -212,6 +256,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onSelectChat, onOpenProf
               </View>
             )}
           </View>
+
+          {item.isGroup && !!memberNames && (
+            <Text style={styles.groupMembersText} numberOfLines={1}>
+              {memberNames}
+            </Text>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -265,9 +315,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onSelectChat, onOpenProf
                 </TouchableOpacity>
               </View>
 
-              {loading ? (
+              {/* Spinner only while the list is genuinely empty — a background
+                  refresh must never blank out chats that are already on screen. */}
+              {loadingChats && sortedChats.length === 0 ? (
                 <ActivityIndicator color={Colors.primary} style={{ marginVertical: 20 }} />
-              ) : chats.length === 0 ? (
+              ) : sortedChats.length === 0 ? (
                 <View style={{ paddingVertical: 12, paddingHorizontal: 20, alignItems: 'center' }}>
                   <Text style={{ color: Colors.textMuted, fontSize: 13, textAlign: 'center' }}>
                     No active chats yet. Start a conversation with registered users below!
@@ -275,7 +327,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onSelectChat, onOpenProf
                 </View>
               ) : (
                 <View>
-                  {chats.map((chatItem) => (
+                  {sortedChats.map((chatItem) => (
                     <React.Fragment key={chatItem.id}>
                       {renderChatItem({ item: chatItem })}
                     </React.Fragment>
@@ -567,6 +619,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8
+  },
+  memberCountText: {
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 8,
+    overflow: 'hidden'
+  },
+  groupMembersText: {
+    color: Colors.textMuted,
+    fontSize: 11,
+    marginTop: 3
   },
   unreadBadge: {
     backgroundColor: Colors.primary,

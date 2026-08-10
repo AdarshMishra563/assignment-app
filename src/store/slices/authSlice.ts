@@ -39,6 +39,21 @@ export const loginUser = createAsyncThunk(
   }
 );
 
+export const loginWithGoogle = createAsyncThunk(
+  'auth/loginWithGoogle',
+  async (payload: { email: string; username?: string; photoUrl?: string; idToken?: string }, { rejectWithValue }) => {
+    try {
+      console.log('[authSlice] Sending POST /auth/google with payload:', payload);
+      const res = await apiClient.post('/auth/google', payload);
+      console.log('[authSlice] Google auth response:', res.status, res.data);
+      return res.data.data; // { user, token }
+    } catch (err: any) {
+      console.error('[authSlice] Google auth API error:', err);
+      return rejectWithValue(err.response?.data?.error || err.message || 'Google Authentication failed');
+    }
+  }
+);
+
 export const loadSavedSession = createAsyncThunk(
   'auth/loadSavedSession',
   async (_, { dispatch }) => {
@@ -98,6 +113,22 @@ const authSlice = createSlice({
         storageService.setItem('pulse_user', JSON.stringify(action.payload.user));
       })
       .addCase(loginUser.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
+      })
+      .addCase(loginWithGoogle.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(loginWithGoogle.fulfilled, (state, action: PayloadAction<{ user: IUser; token: string }>) => {
+        state.loading = false;
+        state.user = action.payload.user;
+        state.token = action.payload.token;
+        state.isAuthenticated = true;
+        storageService.setItem('pulse_auth_token', action.payload.token);
+        storageService.setItem('pulse_user', JSON.stringify(action.payload.user));
+      })
+      .addCase(loginWithGoogle.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string;
       });

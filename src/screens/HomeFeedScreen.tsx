@@ -8,9 +8,11 @@ import {
   ActivityIndicator,
   Image,
   Dimensions,
+  Alert,
 } from 'react-native';
-import { Heart, MessageCircle, Share2, Plus, Bell, Sun, Moon } from 'lucide-react-native';
-import { useAuth } from '../context/AuthContext';
+import { useIsFocused } from '@react-navigation/native';
+import { Heart, MessageCircle, Share2, Plus, Bell, Sun, Moon, Trash2 } from 'lucide-react-native';
+import { useAppSelector } from '../store/hooks';
 import { useTheme } from '../context/ThemeContext';
 import { UserAvatar } from '../components/UserAvatar';
 import { VideoPlayer } from '../components/VideoPlayer';
@@ -28,8 +30,9 @@ interface HomeFeedScreenProps {
 }
 
 export const HomeFeedScreen: React.FC<HomeFeedScreenProps> = ({ onOpenProfile, onNavigateToCreatePost, route }) => {
-  const { user } = useAuth();
+  const user = useAppSelector((state) => state.auth.user);
   const { theme, isDark, toggleTheme } = useTheme();
+  const isFocused = useIsFocused();
 
   const [posts, setPosts] = useState<IPost[]>([]);
   const [usersList, setUsersList] = useState<IUser[]>([]);
@@ -104,34 +107,96 @@ export const HomeFeedScreen: React.FC<HomeFeedScreenProps> = ({ onOpenProfile, o
 
   const handleToggleLike = async (postId: string) => {
     if (!user) return;
+
+    const targetPost = posts.find((p) => p.id === postId);
+    if (!targetPost) return;
+
+    const currentLikes = targetPost.likes || [];
+    const hasLiked = currentLikes.includes(user.id);
+    const updatedLikes = hasLiked
+      ? currentLikes.filter((id) => id !== user.id)
+      : [...currentLikes, user.id];
+
+    // Optimistic UI update (0ms delay)
+    setPosts((prev) =>
+      prev.map((p) => (p.id === postId ? { ...p, likes: updatedLikes } : p))
+    );
+
     try {
       const res = await apiClient.post(`/posts/${postId}/like`);
-      const updatedPost: IPost = res.data.data;
-      setPosts((prev) => prev.map((p) => (p.id === updatedPost.id ? updatedPost : p)));
+      const backendPost: IPost = res.data.data;
+      if (backendPost) {
+        setPosts((prev) => prev.map((p) => (p.id === backendPost.id ? backendPost : p)));
+      }
     } catch (err) {
-      console.error('Error liking post:', err);
+      console.error('Error liking post, reverting optimistic update:', err);
+      // Revert state on network/API failure
+      setPosts((prev) => prev.map((p) => (p.id === postId ? targetPost : p)));
+    }
+  };
+
+  const handleDeletePost = (postId: string) => {
+    Alert.alert(
+      'Delete Post',
+      'Are you sure you want to delete this post?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setPosts((prev) => prev.filter((p) => p.id !== postId));
+            try {
+              await apiClient.delete(`/posts/${postId}`);
+            } catch (err: any) {
+              console.error('Error deleting post:', err);
+              Alert.alert('Error', err?.message || 'Could not delete post.');
+              fetchFeedAndUsers(1);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const formatPostTime = (dateVal?: string | Date) => {
+    if (!dateVal) return '';
+    try {
+      const d = new Date(dateVal);
+      return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '';
     }
   };
 
   const renderPostItem = ({ item }: { item: IPost }) => {
-    const hasLiked = user ? item.likes.includes(user.id) : false;
+    const likesList = item.likes || [];
+    const hasLiked = user ? likesList.includes(user.id) : false;
 
     return (
       <View style={styles.instaPostContainer}>
         
-        {/* Top Header: Author Avatar + Name */}
-        <TouchableOpacity
-          style={styles.postHeader}
-          onPress={() => onOpenProfile?.(item.userId)}
-        >
-          <UserAvatar name={item.username} uri={item.userAvatar} size={38} />
-          <View style={styles.postHeaderInfo}>
-            <Text style={[styles.postUsername, { color: theme.textPrimary }]}>{item.username}</Text>
-            <Text style={[styles.postTime, { color: theme.textMuted }]}>
-              {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </Text>
-          </View>
-        </TouchableOpacity>
+        {/* Top Header: Author Avatar + Name + Delete (if owner) */}
+        <View style={styles.postHeaderRow}>
+          <TouchableOpacity
+            style={styles.postHeader}
+            onPress={() => onOpenProfile?.(item.userId)}
+          >
+            <UserAvatar name={item.username} uri={item.userAvatar} size={38} />
+            <View style={styles.postHeaderInfo}>
+              <Text style={[styles.postUsername, { color: theme.textPrimary }]}>{item.username}</Text>
+              <Text style={[styles.postTime, { color: theme.textMuted }]}>
+                {formatPostTime(item.createdAt)}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {user && item.userId === user.id ? (
+            <TouchableOpacity onPress={() => handleDeletePost(item.id)} style={{ padding: 8 }}>
+              <Trash2 size={20} color="#EF4444" />
+            </TouchableOpacity>
+          ) : null}
+        </View>
 
         {/* Full-width Media View (Open View) */}
         {item.mediaUrl ? (
@@ -141,8 +206,9 @@ export const HomeFeedScreen: React.FC<HomeFeedScreenProps> = ({ onOpenProfile, o
                 uri={item.mediaUrl}
                 posterUri={item.thumbnailUrl}
                 compact
-                muted
-                autoPlay={activeVideoId === item.id}
+                muted={!(isFocused && activeVideoId === item.id)}
+                isFocused={isFocused}
+                autoPlay={isFocused && activeVideoId === item.id}
               />
             ) : (
               <Image source={{ uri: item.mediaUrl }} style={styles.fullWidthImage} resizeMode="cover" />
@@ -150,7 +216,7 @@ export const HomeFeedScreen: React.FC<HomeFeedScreenProps> = ({ onOpenProfile, o
           </View>
         ) : null}
 
-        {/* Action Buttons: Like, Comment, Share */}
+        {/* Action Buttons: Like, Comment */}
         <View style={styles.instaActionsRow}>
           <TouchableOpacity onPress={() => handleToggleLike(item.id)} style={styles.actionIconButton}>
             <Heart
@@ -166,15 +232,11 @@ export const HomeFeedScreen: React.FC<HomeFeedScreenProps> = ({ onOpenProfile, o
           >
             <MessageCircle size={24} color={theme.textPrimary} />
           </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionIconButton}>
-            <Share2 size={22} color={theme.textPrimary} />
-          </TouchableOpacity>
         </View>
 
         {/* Likes & Comments Count */}
         <Text style={[styles.likesCountText, { color: theme.textPrimary }]}>
-          {item.likes.length} {item.likes.length === 1 ? 'like' : 'likes'}
+          {likesList.length} {likesList.length === 1 ? 'like' : 'likes'}
         </Text>
 
         {/* Caption: Bold Author Name + Description */}
@@ -299,6 +361,10 @@ export const HomeFeedScreen: React.FC<HomeFeedScreenProps> = ({ onOpenProfile, o
         visible={!!activeCommentPostId}
         postId={activeCommentPostId}
         onClose={() => setActiveCommentPostId(null)}
+        onOpenProfile={(authorId) => {
+          setActiveCommentPostId(null);
+          onOpenProfile?.(authorId);
+        }}
         onCommentAdded={(postId, newCount) => {
           setPosts((prev) =>
             prev.map((p) => (p.id === postId ? { ...p, commentsCount: newCount } : p))
@@ -405,9 +471,16 @@ const styles = StyleSheet.create({
   instaPostContainer: {
     marginBottom: 24
   },
+  postHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: 8
+  },
   postHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
     gap: 10,
     paddingHorizontal: 14,
     paddingVertical: 10

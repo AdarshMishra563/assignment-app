@@ -30,6 +30,8 @@ import {
 } from 'lucide-react-native';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { logout, updateUserAvatar } from '../store/slices/authSlice';
+import { FCMClientService } from '../services/fcmService';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { toggleTheme } from '../store/slices/themeSlice';
 
 import { UserAvatar } from '../components/UserAvatar';
@@ -390,8 +392,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onSelectChat }) =>
 
               <TouchableOpacity
                 style={[styles.settingsRow, { borderBottomWidth: 0 }]}
-                onPress={() => {
+                onPress={async () => {
                   setShowSettings(false);
+                  // Detach this device's push token BEFORE clearing the JWT,
+                  // otherwise the token stays bound to the old account and the
+                  // next person to sign in on this device receives their pushes.
+                  await FCMClientService.unregister().catch(() => {});
+                  // Drop the cached native Google session so the account
+                  // chooser is shown again on the next sign-in.
+                  await GoogleSignin.signOut().catch(() => {});
                   dispatch(logout());
                 }}
               >

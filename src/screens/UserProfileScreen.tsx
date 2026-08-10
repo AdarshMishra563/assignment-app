@@ -21,7 +21,7 @@ import {
   X,
   Film,
 } from 'lucide-react-native';
-import { useAuth } from '../context/AuthContext';
+import { useAppSelector } from '../store/hooks';
 import { useTheme } from '../context/ThemeContext';
 import { UserAvatar } from '../components/UserAvatar';
 import { VideoPlayer } from '../components/VideoPlayer';
@@ -44,7 +44,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
   onBack,
   onSelectChat,
 }) => {
-  const { user: currentUser } = useAuth();
+  const currentUser = useAppSelector((state) => state.auth.user);
   const { theme } = useTheme();
 
   const [profileUser, setProfileUser] = useState<IUser | null>(null);

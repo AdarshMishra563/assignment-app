@@ -7,6 +7,8 @@ import {
   Text,
   Image,
 } from 'react-native';
+import Video from 'react-native-video';
+import { Play, Pause, Volume2, VolumeX } from 'lucide-react-native';
 import { BACKEND_BASE_URL } from '../config/env';
 
 interface VideoPlayerProps {
@@ -16,6 +18,8 @@ interface VideoPlayerProps {
   autoPlay?: boolean;
   muted?: boolean;
   compact?: boolean;
+  isFocused?: boolean;
+  paused?: boolean;
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
@@ -25,20 +29,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   autoPlay = true,
   muted: initialMuted = true,
   compact = false,
+  isFocused = true,
+  paused: parentPaused,
 }) => {
-  const videoRef = useRef<VideoRef>(null);
+  const videoRef = useRef<any>(null);
   const hideTimerRef = useRef<any>(null);
 
-  const [paused, setPaused] = useState(!autoPlay);
+  const [paused, setPaused] = useState(!autoPlay || !isFocused || !!parentPaused);
   const [isMuted, setIsMuted] = useState(initialMuted);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [showIconOverlay, setShowIconOverlay] = useState(false);
 
-  // Sync paused state when autoPlay prop changes (ensures only 1 video plays at a time in feed)
+  // Sync paused state when autoPlay / isFocused / parentPaused prop changes
   useEffect(() => {
-    setPaused(!autoPlay);
-  }, [autoPlay]);
+    if (isFocused === false || parentPaused === true) {
+      setPaused(true);
+    } else {
+      setPaused(!autoPlay);
+    }
+  }, [autoPlay, isFocused, parentPaused]);
+
+  // Unmount cleanup: pause video audio immediately when unmounted
+  useEffect(() => {
+    return () => {
+      setPaused(true);
+    };
+  }, []);
 
   const getFormattedUri = (rawUri: string) => {
     if (!rawUri) return '';
@@ -113,12 +130,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           setIsLoading(false);
           setHasError(false);
         }}
-        onError={(err) => {
+        onError={(err: any) => {
           console.warn('[VideoPlayer] Video load warning/error:', err, formattedUri);
           setHasError(true);
           setIsLoading(false);
         }}
-        onBuffer={({ isBuffering }) => setIsLoading(isBuffering)}
+        onBuffer={({ isBuffering }: any) => setIsLoading(isBuffering)}
       />
 
       {/* Tap area to toggle play/pause */}

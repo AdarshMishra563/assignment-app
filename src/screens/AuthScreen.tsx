@@ -25,14 +25,43 @@ import {
   Zap,
 } from 'lucide-react-native';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { loginUser, setCredentials } from '../store/slices/authSlice';
+import { loginUser, loginWithGoogle, setCredentials } from '../store/slices/authSlice';
+import { FCMClientService } from '../services/fcmService';
 import { useTheme } from '../context/ThemeContext';
 import { apiClient } from '../api/client';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+import { GOOGLE_WEB_CLIENT_ID, isGoogleSignInConfigured } from '../config/env';
 
 export const AuthScreen: React.FC = () => {
   const dispatch = useAppDispatch();
   const { theme } = useTheme();
   const { loading: isLoading } = useAppSelector((state) => state.auth);
+
+  useEffect(() => {
+    try {
+      // `webClientId` is REQUIRED on Android. Without it the native account
+      // chooser cannot resolve an OAuth client and closes instantly (which the
+      // SDK reports as DEVELOPER_ERROR, or on some devices as a bare cancel) —
+      // that is the "account list never shows up" symptom.
+      if (!isGoogleSignInConfigured()) {
+        console.warn(
+          '[AuthScreen] GOOGLE_WEB_CLIENT_ID is not set in src/config/env.ts. ' +
+            'The Google account picker will not show any accounts until it is.'
+        );
+      }
+
+      GoogleSignin.configure({
+        webClientId: GOOGLE_WEB_CLIENT_ID || undefined,
+        scopes: ['email', 'profile'],
+        // offlineAccess requires a valid webClientId; enabling it without one
+        // makes signIn() fail before the picker is ever drawn.
+        offlineAccess: isGoogleSignInConfigured(),
+        forceCodeForRefreshToken: false,
+      });
+    } catch (e) {
+      console.warn('GoogleSignin configure warning:', e);
+    }
+  }, []);
 
   const [mode, setMode] = useState<'login' | 'signup'>('login');
 
@@ -126,6 +155,7 @@ export const AuthScreen: React.FC = () => {
           email: finalEmail,
         })
       ).unwrap();
+      FCMClientService.requestUserPermissionAndGetToken();
     } catch (err: any) {
       const errorMessage = typeof err === 'string' ? err : err?.message || 'Authentication failed';
       Alert.alert('Auth Error', errorMessage);
@@ -135,20 +165,78 @@ export const AuthScreen: React.FC = () => {
   };
 
   const handleGoogleSignIn = async () => {
+    if (!isGoogleSignInConfigured()) {
+      Alert.alert(
+        'Google Sign-In Not Configured',
+        'GOOGLE_WEB_CLIENT_ID is missing in src/config/env.ts, and android/app/google-services.json ' +
+          'has an empty "oauth_client" list.\n\n' +
+          'Register the app SHA-1 fingerprint in the Firebase Console, re-download ' +
+          'google-services.json, and paste the Web client ID into env.ts.'
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const res = await apiClient.post('/auth/google', {
-        email: 'user.google@gmail.com',
-        username: 'GoogleUser',
-        photoUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=250&q=80',
-      });
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      // Force the account chooser to appear every time by dropping any cached
+      // native session first. Without this the SDK silently reuses the last
+      // account and no list is shown.
+      await GoogleSignin.signOut().catch(() => {});
 
-      if (res.data?.data) {
-        dispatch(setCredentials(res.data.data));
+      const response = await GoogleSignin.signIn();
+
+      // v13+ returns { type: 'success' | 'cancelled', data }, older returns flat.
+      if ((response as any)?.type === 'cancelled') {
+        console.log('[AuthScreen] Google sign-in dismissed by user.');
+        return;
+      }
+
+      const userObj = response.data?.user || (response as any).user;
+      const idToken = response.data?.idToken || (response as any).idToken;
+
+      if (userObj?.email) {
+        await dispatch(
+          loginWithGoogle({
+            email: userObj.email,
+            username: userObj.name || userObj.givenName || userObj.email.split('@')[0],
+            photoUrl: userObj.photo || undefined,
+            idToken: idToken || undefined,
+          })
+        ).unwrap();
+        // Register the device for push now that a JWT exists in storage.
+        FCMClientService.requestUserPermissionAndGetToken();
+      } else {
+        throw new Error('Google Sign-In did not return account info.');
       }
     } catch (err: any) {
-      console.error('[AuthScreen] Google auth error:', err);
-      Alert.alert('Google Auth Failed', err?.message || 'Could not authenticate with Google.');
+      console.warn('[AuthScreen] Google Sign-In error:', err?.code, err?.message, err);
+
+      if (err.code === statusCodes.SIGN_IN_CANCELLED) {
+        // NOTE: a *misconfigured* app also surfaces here on some OEM devices —
+        // the chooser flashes and closes before any account is listed. Never
+        // swallow this silently, it is the exact bug we are debugging.
+        Alert.alert(
+          'Sign-In Dismissed',
+          'The Google account chooser closed before an account was picked.\n\n' +
+            'If you never saw a list of accounts, the app SHA-1 fingerprint is not ' +
+            'registered in the Firebase Console for package com.pulsechatapp.'
+        );
+      } else if (err.code === statusCodes.IN_PROGRESS) {
+        Alert.alert('Google Sign-In', 'Sign-in operation already in progress.');
+      } else if (err.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        Alert.alert('Google Sign-In', 'Google Play Services are not available on this device.');
+      } else if (String(err?.code) === '10' || /DEVELOPER_ERROR/i.test(String(err?.message))) {
+        Alert.alert(
+          'Google Sign-In Misconfigured (DEVELOPER_ERROR)',
+          'Google rejected this app\'s OAuth configuration. Fix all three:\n\n' +
+            '1. Add the SHA-1 fingerprint to Firebase Console for com.pulsechatapp\n' +
+            '2. Re-download google-services.json (its "oauth_client" must not be empty)\n' +
+            '3. Set GOOGLE_WEB_CLIENT_ID in src/config/env.ts to the Web client ID'
+        );
+      } else {
+        Alert.alert('Google Sign-In Error', err?.message || 'Could not authenticate with Google.');
+      }
     } finally {
       setIsSubmitting(false);
     }

@@ -29,6 +29,7 @@ interface CommentsModalProps {
   visible: boolean;
   postId: string | null;
   onClose: () => void;
+  onOpenProfile?: (userId: string) => void;
   onCommentAdded?: (postId: string, newCount: number) => void;
 }
 
@@ -36,6 +37,7 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
   visible,
   postId,
   onClose,
+  onOpenProfile,
   onCommentAdded,
 }) => {
   const { theme } = useTheme();
@@ -120,14 +122,18 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
               contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 12 }}
               renderItem={({ item }) => (
                 <View style={styles.commentItem}>
-                  <UserAvatar name={item.username} uri={item.userAvatar} size={36} />
+                  <TouchableOpacity onPress={() => item.userId && onOpenProfile?.(item.userId)}>
+                    <UserAvatar name={item.username} uri={item.userAvatar} size={36} />
+                  </TouchableOpacity>
                   <View style={{ flex: 1 }}>
                     <View style={styles.commentMeta}>
-                      <Text style={[styles.usernameText, { color: theme.textPrimary }]}>
-                        {item.username}
-                      </Text>
+                      <TouchableOpacity onPress={() => item.userId && onOpenProfile?.(item.userId)}>
+                        <Text style={[styles.usernameText, { color: theme.textPrimary }]}>
+                          {item.username}
+                        </Text>
+                      </TouchableOpacity>
                       <Text style={[styles.timeText, { color: theme.textMuted }]}>
-                        {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {item.createdAt ? new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                       </Text>
                     </View>
                     <Text style={[styles.commentText, { color: theme.textPrimary }]}>

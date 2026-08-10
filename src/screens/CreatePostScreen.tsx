@@ -10,7 +10,7 @@ import {
   Image
 } from 'react-native';
 import { Image as ImageIcon, Video, Send, Camera, Check } from 'lucide-react-native';
-import { useAuth } from '../context/AuthContext';
+import { useAppSelector } from '../store/hooks';
 import { useTheme } from '../context/ThemeContext';
 import { apiClient } from '../api/client';
 import {
@@ -27,7 +27,7 @@ interface CreatePostScreenProps {
 }
 
 export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({ onPostPublished }) => {
-  const { user } = useAuth();
+  const user = useAppSelector((state) => state.auth.user);
   const { theme } = useTheme();
 
   const [caption, setCaption] = useState('');

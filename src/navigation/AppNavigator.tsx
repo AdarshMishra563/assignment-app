@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, ActivityIndicator } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, ActivityIndicator, AppState } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { Home, Users, PlusSquare, MessageSquare, User } from 'lucide-react-native';
@@ -16,6 +16,7 @@ import { UserProfileScreen } from '../screens/UserProfileScreen';
 
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { loadSavedSession } from '../store/slices/authSlice';
+import { fetchChats } from '../store/slices/chatSlice';
 import { initializeSocketReduxListeners } from '../services/socketReduxBridge';
 import { FCMClientService } from '../services/fcmService';
 import { DarkTheme, LightTheme } from '../theme/colors';
@@ -26,39 +27,38 @@ import { useTheme } from '../context/ThemeContext';
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 
-export function MainTabNavigator({ navigation }: any) {
+export function MainTabNavigator({ navigation, activeRoomId, setActiveRoomId }: any) {
   const { theme } = useTheme();
+  const dispatch = useAppDispatch();
   const { user } = useAppSelector((state) => state.auth);
-  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const chats = useAppSelector((state) => state.chat.chats);
 
-  const fetchUnreadChatsCount = async () => {
-    try {
-      const res = await apiClient.get('/chats');
-      const chatsList: any[] = res.data.data || [];
-      const unreadCountVal = chatsList.filter((c) => (c.unreadCount || 0) > 0).length;
-      setUnreadCount(unreadCountVal);
-    } catch (err) {
-      console.warn('Could not fetch unread chats badge:', err);
-    }
-  };
+  // Total unread MESSAGES across every room. This previously counted rooms, and
+  // read from a separate /chats call whose result was thrown away by the list
+  // screen — the two could disagree. Now both derive from the same Redux state,
+  // which the socket bridge keeps current.
+  const unreadCount = React.useMemo(
+    () => chats.reduce((sum, c) => sum + (c.unreadCount || 0), 0),
+    [chats]
+  );
+
+  // Authoritative refresh from the server. The socket keeps the count live, but
+  // this covers cold start and anything missed while the app was backgrounded.
+  useEffect(() => {
+    if (!user) return;
+    dispatch(fetchChats());
+  }, [user, dispatch]);
 
   useEffect(() => {
-    if (user) {
-      fetchUnreadChatsCount();
-      const socket = socketService.getSocket();
-      if (socket) {
-        const handleNewMsg = () => fetchUnreadChatsCount();
-        socket.on('receive_message', handleNewMsg);
-        socket.on('message:received', handleNewMsg);
-        return () => {
-          socket.off('receive_message', handleNewMsg);
-          socket.off('message:received', handleNewMsg);
-        };
-      }
-    }
-  }, [user]);
+    if (!user) return;
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') dispatch(fetchChats());
+    });
+    return () => sub.remove();
+  }, [user, dispatch]);
 
   const handleSelectChat = (room: any) => {
+    if (setActiveRoomId) setActiveRoomId(room.id);
     navigation.navigate('ChatRoom', { room });
   };
 
@@ -165,6 +165,10 @@ export function AppNavigator() {
   const [isOnboarded, setIsOnboarded] = useState(true);
   const [inAppNotification, setInAppNotification] = useState<InAppNotificationData | null>(null);
 
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const activeRoomIdRef = useRef<string | null>(null);
+  activeRoomIdRef.current = activeRoomId;
+
   useEffect(() => {
     const initSession = async () => {
       await dispatch(loadSavedSession());
@@ -182,12 +186,27 @@ export function AppNavigator() {
       if (socket) {
         const handleGlobalMessage = (newMsg: any) => {
           if (newMsg.senderId !== user.id) {
-            setInAppNotification({
-              roomId: newMsg.roomId,
-              senderName: newMsg.senderName || 'Message',
-              senderAvatar: newMsg.senderAvatar,
-              content: newMsg.type === 'audio' ? '🎤 Voice Note' : newMsg.content || 'Shared attachment',
-            });
+            if (newMsg.roomId !== activeRoomIdRef.current) {
+              // Recipient is outside room: emit mark_message_delivered -> Double Grey Tick
+              socket.emit('mark_message_delivered', {
+                messageId: newMsg.id,
+                roomId: newMsg.roomId,
+                userId: user.id,
+              });
+
+              setInAppNotification({
+                roomId: newMsg.roomId,
+                senderName: newMsg.senderName || 'Message',
+                senderAvatar: newMsg.senderAvatar,
+                content: newMsg.type === 'audio' ? '🎤 Voice Note' : newMsg.content || 'Shared attachment',
+              });
+            } else {
+              // Recipient is inside room: emit mark_messages_read -> Blue Double Tick
+              socket.emit('mark_messages_read', {
+                roomId: newMsg.roomId,
+                userId: user.id,
+              });
+            }
           }
         };
         socket.on('receive_message', handleGlobalMessage);
@@ -215,7 +234,6 @@ export function AppNavigator() {
         notification={inAppNotification}
         onPressOpen={(roomId) => {
           setInAppNotification(null);
-          // Navigate to ChatRoom if available
         }}
         onDismiss={() => setInAppNotification(null)}
       />
@@ -229,12 +247,23 @@ export function AppNavigator() {
           </Stack.Screen>
         ) : (
           <>
-            <Stack.Screen name="MainTabs" component={MainTabNavigator} />
+            <Stack.Screen name="MainTabs">
+              {(props) => (
+                <MainTabNavigator
+                  {...props}
+                  activeRoomId={activeRoomId}
+                  setActiveRoomId={setActiveRoomId}
+                />
+              )}
+            </Stack.Screen>
             <Stack.Screen name="ChatRoom">
               {(props: any) => (
                 <ChatRoomScreen
                   room={props.route.params.room}
-                  onBack={() => props.navigation.goBack()}
+                  onBack={() => {
+                    setActiveRoomId(null);
+                    props.navigation.goBack();
+                  }}
                 />
               )}
             </Stack.Screen>
@@ -243,7 +272,10 @@ export function AppNavigator() {
                 <UserProfileScreen
                   userId={props.route.params.userId}
                   onBack={() => props.navigation.goBack()}
-                  onSelectChat={(room) => props.navigation.navigate('ChatRoom', { room })}
+                  onSelectChat={(room) => {
+                    setActiveRoomId(room.id);
+                    props.navigation.navigate('ChatRoom', { room });
+                  }}
                 />
               )}
             </Stack.Screen>

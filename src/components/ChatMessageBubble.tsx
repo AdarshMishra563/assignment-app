@@ -9,10 +9,17 @@ import { VideoPlayer } from './VideoPlayer';
 interface ChatMessageBubbleProps {
   message: IMessage;
   isSender: boolean;
+  /** Group threads label every incoming bubble with its author. */
+  isGroup?: boolean;
   onPressMedia?: (url: string, type: 'image' | 'video') => void;
 }
 
-export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({ message, isSender, onPressMedia }) => {
+const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
+  message,
+  isSender,
+  isGroup,
+  onPressMedia,
+}) => {
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
 
   const formatTime = (dateStr: string | Date) => {
@@ -27,15 +34,15 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({ message, i
   const renderStatus = () => {
     if (!isSender) return null;
     if (message.isUploading) {
-      return <ActivityIndicator size={12} color="rgba(255, 255, 255, 0.8)" />;
+      return <ActivityIndicator size={12} color="#FFFFFF" />;
     }
     if (message.status === 'read') {
-      return <CheckCheck size={14} color="#38BDF8" />;
+      return <CheckCheck size={15} color="#38BDF8" strokeWidth={2.5} />;
     }
     if (message.status === 'delivered') {
-      return <CheckCheck size={14} color={Colors.textSecondary} />;
+      return <CheckCheck size={15} color="rgba(255, 255, 255, 0.9)" strokeWidth={2} />;
     }
-    return <Check size={14} color={Colors.textSecondary} />;
+    return <Check size={15} color="rgba(255, 255, 255, 0.75)" strokeWidth={2} />;
   };
 
   return (
@@ -49,9 +56,17 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({ message, i
 
       <View style={[styles.bubble, isSender ? styles.bubbleSender : styles.bubbleReceiver]}>
         
-        {/* Sender Name if Group Chat or Receiver */}
+        {/* Author label. Always shown in groups so it is clear who wrote what;
+            in a 1:1 thread the header already names the other person. */}
         {!isSender && message.senderName && (
-          <Text style={styles.senderName}>{message.senderName}</Text>
+          <Text style={styles.senderName} numberOfLines={1}>
+            {message.senderName}
+          </Text>
+        )}
+        {isSender && isGroup && (
+          <Text style={[styles.senderName, styles.senderNameOwn]} numberOfLines={1}>
+            You
+          </Text>
         )}
 
         {/* Message Content according to type */}
@@ -173,6 +188,22 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({ message, i
   );
 };
 
+export const ChatMessageBubble = React.memo(
+  ChatMessageBubbleComponent,
+  (prevProps, nextProps) => {
+    return (
+      prevProps.isSender === nextProps.isSender &&
+      prevProps.isGroup === nextProps.isGroup &&
+      prevProps.message.id === nextProps.message.id &&
+      prevProps.message.status === nextProps.message.status &&
+      prevProps.message.content === nextProps.message.content &&
+      prevProps.message.isUploading === nextProps.message.isUploading &&
+      prevProps.message.uploadProgress === nextProps.message.uploadProgress &&
+      prevProps.message.mediaUrl === nextProps.message.mediaUrl
+    );
+  }
+);
+
 const styles = StyleSheet.create({
   wrapper: {
     marginVertical: 4,
@@ -186,12 +217,11 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start'
   },
   bubble: {
-    maxWidth: '78%',
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)'
+    maxWidth: '82%',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 0,
   },
   bubbleSender: {
     backgroundColor: Colors.chatBubbleSender,
@@ -206,6 +236,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.primary,
     marginBottom: 4
+  },
+  senderNameOwn: {
+    color: 'rgba(255, 255, 255, 0.85)'
   },
   text: {
     fontSize: 14,
@@ -249,13 +282,14 @@ const styles = StyleSheet.create({
     fontWeight: '500'
   },
   videoContainer: {
-    borderRadius: 12,
+    borderRadius: 10,
     overflow: 'hidden',
     position: 'relative',
-    marginVertical: 4,
+    marginVertical: 2,
     minWidth: 200,
     height: 140,
     backgroundColor: '#0F172A',
+    borderWidth: 0,
     justifyContent: 'center',
     alignItems: 'center'
   },
