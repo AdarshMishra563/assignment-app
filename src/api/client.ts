@@ -1,11 +1,9 @@
 import axios from 'axios';
 import { Platform } from 'react-native';
 import { storageService } from '../services/storageService';
+import { API_BASE_URL } from '../config/env';
 
-// Physical Android Device IP / Emulator Host
-const DEV_SERVER_IP = '10.47.248.118'; 
-const SERVER_HOST = Platform.OS === 'android' ? `${DEV_SERVER_IP}:5000` : 'localhost:5000';
-export const API_BASE_URL = `http://${SERVER_HOST}/api/v1`;
+export { API_BASE_URL };
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,

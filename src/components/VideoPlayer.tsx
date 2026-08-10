@@ -7,8 +7,7 @@ import {
   Text,
   Image,
 } from 'react-native';
-import Video, { VideoRef } from 'react-native-video';
-import { Play, Pause, Volume2, VolumeX } from 'lucide-react-native';
+import { BACKEND_BASE_URL } from '../config/env';
 
 interface VideoPlayerProps {
   uri: string;
@@ -51,7 +50,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     ) {
       return rawUri;
     }
-    return `http://10.47.248.118:5000${rawUri.startsWith('/') ? '' : '/'}${rawUri}`;
+    return `${BACKEND_BASE_URL}${rawUri.startsWith('/') ? '' : '/'}${rawUri}`;
   };
 
   const formattedUri = getFormattedUri(uri);

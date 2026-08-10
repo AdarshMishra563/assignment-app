@@ -1,9 +1,7 @@
 import { io, Socket } from 'socket.io-client';
-import { Platform } from 'react-native';
+import { BACKEND_BASE_URL } from '../config/env';
 
-const DEV_SERVER_IP = '10.47.248.118';
-const SERVER_HOST = Platform.OS === 'android' ? `${DEV_SERVER_IP}:5000` : 'localhost:5000';
-const SOCKET_SERVER_URL = `http://${SERVER_HOST}`;
+const SOCKET_SERVER_URL = BACKEND_BASE_URL;
 
 class SocketService {
   private socket: Socket | null = null;
