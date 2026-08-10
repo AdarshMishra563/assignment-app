@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "905606872942",
+    "project_id": "chatapp-5d8d5",
+    "storage_bucket": "chatapp-5d8d5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:905606872942:android:38c77b7c747ec2e3b2cb7f",
+        "android_client_info": {
+          "package_name": "com.pulsechatapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDXLYjroWjMarcXOa50e-gkYncrzZKzQbA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
