@@ -237,13 +237,7 @@ frontend-new/
 | `@react-native-firebase/remote-config`, `react-native-device-info` | The force/soft app-update modal (§11 above) — fetches remote version thresholds and reads the installed app version to compare against them. |
 | `@d11/react-native-fast-image` | Optional faster `<Image>` used only in `ZAxisHeroBanner.tsx`, loaded defensively via `require()` with a fallback to core RN `Image` if unavailable. |
 
-### Installed but not currently used by the active app
-A few packages remain in `package.json` from earlier iterations and aren't imported anywhere in the current `src/` tree — flagged here for honesty rather than silently carried:
-- `@shopify/flash-list`, `dayjs`, `react-native-linear-gradient`, `react-native-vector-icons` — no imports anywhere.
-- `react-native-reanimated`, `react-native-worklets` — the Babel worklets plugin is wired in `babel.config.js`, but no component actually uses Reanimated.
-- `@react-native-google-signin/google-signin`, `react-native-image-crop-picker`, `react-native-video`, `socket.io-client` — only referenced by the orphaned `src_temp/` folder (the original "pulse chat app" this project was repurposed from), which nothing in the active `src/` tree imports.
 
-These are safe to remove if you want a leaner `node_modules`, or safe to leave if you expect to reuse them later — neither choice affects the app as it stands today.
 
 ---
 
