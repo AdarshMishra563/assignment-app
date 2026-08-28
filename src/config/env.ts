@@ -1,38 +1,58 @@
-// Centralized API and Backend configuration
-export const LIVE_BACKEND_URL = 'https://chat-app-backend-8l0i.onrender.com';
+/**
+ * Centralized environment configuration — the single source of truth for
+ * API endpoints, the mock-server toggle, and the dev-only "chaos" knobs
+ * used to make the reliability requirements (slow network, timeouts,
+ * random failures, malformed responses, session expiry) genuinely
+ * reachable in an app that has no real backend yet.
+ *
+ * Nothing here should be hardcoded again in client.ts / mockServer.ts —
+ * import `env` instead.
+ */
 
-// Toggle this to true if you want to test locally against local Node server
-export const USE_LOCAL_DEV_SERVER = false;
-export const LOCAL_DEV_IP = '10.47.248.118';
-export const LOCAL_DEV_PORT = '5000';
+// Jest's `@react-native/jest-preset` forces the `__DEV__` global to `true`
+// for every test run, and Jest itself sets `process.env.NODE_ENV` to
+// `'test'` when it isn't already set. We use that to keep the chaos
+// simulation out of the test runner so `npx jest` stays deterministic,
+// while still treating it as "dev" everywhere else (Metro dev server).
+const isTestEnv = (globalThis as any)?.process?.env?.NODE_ENV === 'test';
 
-export const BACKEND_BASE_URL = USE_LOCAL_DEV_SERVER
-  ? `http://${LOCAL_DEV_IP}:${LOCAL_DEV_PORT}`
-  : LIVE_BACKEND_URL;
+export interface EnvConfig {
+  /** Base URL for the real axios client (used once `USE_MOCK_SERVER` is false). */
+  API_BASE_URL: string;
+  /** Single source of truth for whether ApiClient serves requests from the in-memory mock server instead of axios. */
+  USE_MOCK_SERVER: boolean;
+  /** Request timeout, in ms. Applied to the axios client config and to the mock timeout race in client.ts. */
+  API_TIMEOUT_MS: number;
+  /** Dev-only toggle that enables random failures / malformed responses / artificial timeouts in the mock server. Always false in production and in the Jest test runner. */
+  SIMULATE_NETWORK_ISSUES: boolean;
+  /** Baseline artificial latency applied to every mock request, in ms. */
+  MOCK_BASE_DELAY_MS: number;
+  /** Extra latency layered on top of MOCK_BASE_DELAY_MS when slow-network simulation is active. */
+  MOCK_SLOW_NETWORK_EXTRA_MS: number;
+  /** Probability (0-1) a mock call rejects outright with a network/500/503-style error. */
+  RANDOM_FAILURE_RATE: number;
+  /** Probability (0-1) a mock call resolves with a deliberately malformed/partial payload. */
+  MALFORMED_RESPONSE_RATE: number;
+  /** Probability (0-1) a mock call hangs long enough to trigger the client-side timeout race. */
+  TIMEOUT_SIMULATION_RATE: number;
+  /** How long the mock session token stays valid before session-expiry handling kicks in, in ms. */
+  SESSION_TTL_MS: number;
+}
 
-export const API_BASE_URL = `${BACKEND_BASE_URL}/api/v1`;
+const DEV_API_BASE_URL = 'https://api-dev.amrutam.health/v1';
+const PROD_API_BASE_URL = 'https://api.amrutam.health/v1';
 
-// ---------------------------------------------------------------------------
-// Google Sign-In (OAuth 2.0)
-// ---------------------------------------------------------------------------
-// This MUST be the "Web application" OAuth client ID (client_type 3) from the
-// Firebase project `chatapp-5d8d5` — NOT the Android client ID.
-//
-// Where to get it:
-//   Firebase Console -> Project Settings -> General -> Your apps -> Android app
-//   -> "Web client ID", or Google Cloud Console -> APIs & Services ->
-//   Credentials -> OAuth 2.0 Client IDs -> "Web client (auto created by Google Service)".
-//
-// Taken from android/app/google-services.json -> client[0].oauth_client entry
-// with "client_type": 3. This value is not a secret: it ships inside the APK.
-//
-// The matching Android client (client_type 1) is bound to SHA-1
-// 5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25 (debug.keystore).
-// If you ever sign with a different keystore, register that SHA-1 too or the
-// account chooser will close instantly with DEVELOPER_ERROR.
-export const GOOGLE_WEB_CLIENT_ID =
-  '905606872942-f3k6v76pbhrqpqomjspse3tat6ga8ngv.apps.googleusercontent.com';
+export const env: EnvConfig = {
+  API_BASE_URL: __DEV__ ? DEV_API_BASE_URL : PROD_API_BASE_URL,
+  USE_MOCK_SERVER: true,
+  API_TIMEOUT_MS: 10000,
+  SIMULATE_NETWORK_ISSUES: __DEV__ && !isTestEnv,
+  MOCK_BASE_DELAY_MS: 120,
+  MOCK_SLOW_NETWORK_EXTRA_MS: 1500,
+  RANDOM_FAILURE_RATE: 0.06,
+  MALFORMED_RESPONSE_RATE: 0.04,
+  TIMEOUT_SIMULATION_RATE: 0.03,
+  SESSION_TTL_MS: 30 * 60 * 1000,
+};
 
-export const isGoogleSignInConfigured = () =>
-  typeof GOOGLE_WEB_CLIENT_ID === 'string' &&
-  GOOGLE_WEB_CLIENT_ID.endsWith('.apps.googleusercontent.com');
+export default env;

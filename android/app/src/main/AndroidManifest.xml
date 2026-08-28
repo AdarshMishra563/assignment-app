@@ -1,6 +1,8 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
@@ -9,6 +11,9 @@
     <!-- Required on Android 13+ (API 33). targetSdk is 36, so without this the
          user is never prompted and no notification is ever displayed. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Fingerprint / Face unlock for the Biometric Vault Lock (react-native-biometrics). -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
 
     <application
       android:name=".MainApplication"
@@ -28,14 +33,18 @@
       <!-- MUST match the `channelId` the backend sends in
            FCMNotificationService.ts ('pulse_messages_channel'). On Android 8+
            a push aimed at a channel that does not exist is dropped silently.
-           Declaring it here makes the Firebase SDK auto-create the channel. -->
+           Declaring it here makes the Firebase SDK auto-create the channel.
+           tools:replace overrides the empty default that
+           @react-native-firebase/messaging contributes via its own manifest. -->
       <meta-data
         android:name="com.google.firebase.messaging.default_notification_channel_id"
-        android:value="pulse_messages_channel" />
+        android:value="pulse_messages_channel"
+        tools:replace="android:value" />
 
       <meta-data
         android:name="com.google.firebase.messaging.default_notification_color"
-        android:resource="@color/notification_accent" />
+        android:resource="@color/notification_accent"
+        tools:replace="android:resource" />
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"

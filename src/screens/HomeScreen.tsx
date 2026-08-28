@@ -1,501 +1,311 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import {
-  View,
-  Text,
-  FlatList,
-  TouchableOpacity,
+  Image,
+  Pressable,
+  ScrollView,
   StyleSheet,
-  ActivityIndicator,
-  Modal,
-  TextInput,
-  Alert
+  Text,
+  View,
 } from 'react-native';
-import { LogOut, Plus, Search, MessageSquarePlus, Users, Sun, Moon } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
+import {
+  Calendar,
+  ChevronRight,
+  FileText,
+  Heart,
+  Plus,
+  ShieldCheck,
+  ShoppingBag,
+  Sparkles,
+  Stethoscope,
+  Video,
+} from 'lucide-react-native';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { logout } from '../store/slices/authSlice';
-import { toggleTheme } from '../store/slices/themeSlice';
-import { useFocusEffect } from '@react-navigation/native';
-import { fetchChats, markRoomRead } from '../store/slices/chatSlice';
-import { UserAvatar } from '../components/UserAvatar';
-import { IChatRoom, IUser } from '../types';
-import { apiClient } from '../api/client';
-import { Colors } from '../theme/colors';
+import { fetchDoctors } from '../features/consultations/store/consultationsSlice';
+import { fetchProducts } from '../features/shop/store/productsSlice';
+import { fetchHealthRecords } from '../features/health-records/store/healthRecordsSlice';
+import { useColor } from '../design-system/theme/ThemeProvider';
+import { radius, spacing } from '../design-system/theme/spacing';
+import { typography } from '../design-system/theme/typography';
+import { ZAxisHeroBanner } from '../design-system/components/ZAxisHeroBanner';
+import { Card } from '../design-system/components/Card';
+import { SectionHeader } from '../design-system/components/SectionHeader';
+import { Badge } from '../design-system/components/Badge';
+import { WaveDivider } from '../design-system/components/WaveDivider';
+import { RadialGlowBackground } from '../design-system/components/RadialGlowBackground';
 
-interface HomeScreenProps {
-  onSelectChat: (room: IChatRoom) => void;
-  onOpenProfile?: (userId: string) => void;
-}
+const HERO_IMAGES = [
+  'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=800',
+  'https://images.unsplash.com/photo-1608571423902-eed4a5ad8108?w=800',
+  'https://images.unsplash.com/photo-1594824813580-ff677464d509?w=800',
+];
 
-export const HomeScreen: React.FC<HomeScreenProps> = ({ onSelectChat, onOpenProfile }) => {
+const HERO_CAPTION_KEYS = [
+  { labelKey: 'home.hero1_label', titleKey: 'home.hero1_title', subKey: 'home.hero1_sub', ctaKey: 'home.hero1_cta' },
+  { labelKey: 'home.hero2_label', titleKey: 'home.hero2_title', subKey: 'home.hero2_sub', ctaKey: 'home.hero2_cta' },
+  { labelKey: 'home.hero3_label', titleKey: 'home.hero3_title', subKey: 'home.hero3_sub', ctaKey: 'home.hero3_cta' },
+];
+
+export const HomeScreen = ({ navigation }: { navigation: any }) => {
+  const COLOR = useColor();
+  const { t } = useTranslation();
   const dispatch = useAppDispatch();
+  const insets = useSafeAreaInsets();
+
+  const HERO_CAPTIONS = HERO_CAPTION_KEYS.map((k) => ({
+    label: t(k.labelKey),
+    title: t(k.titleKey),
+    subtitle: t(k.subKey),
+    cta: t(k.ctaKey),
+  }));
+
   const user = useAppSelector((state) => state.auth.user);
-  const isDark = useAppSelector((state) => state.theme.isDark);
-
-  // Presence comes from Redux, not SocketContext. SocketContext derives its
-  // user from AuthContext, which the Redux login flow never populates — so its
-  // socket (and therefore its onlineUsers map) stays empty after signing in.
-  const onlineUsersMap = useAppSelector((state) => state.presence.onlineUsers);
-  const onlineUsers = React.useMemo(
-    () => ({ get: (id?: string) => (id ? !!onlineUsersMap[id] : false) }),
-    [onlineUsersMap]
-  );
-
-  // Chats live in Redux so the socket bridge, the tab badge and this list all
-  // read the same data. Keeping a private copy here meant incoming messages
-  // updated one and not the others.
-  const chats = useAppSelector((state) => state.chat.chats);
-  const loadingChats = useAppSelector((state) => state.chat.loadingChats);
-
-  const [usersList, setUsersList] = useState<IUser[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [showNewChatModal, setShowNewChatModal] = useState<boolean>(false);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-
-  // Group Mode State
-  const [isGroupMode, setIsGroupMode] = useState(false);
-  const [groupName, setGroupName] = useState('');
-  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
-  const [creatingGroup, setCreatingGroup] = useState(false);
-
-  const loadUsers = async () => {
-    try {
-      const usersRes = await apiClient.get('/users');
-      setUsersList(usersRes.data.data || []);
-    } catch (err) {
-      console.error('Failed to load users:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const patientProfile = useAppSelector((state) => state.patientProfile);
+  const topDoctors = useAppSelector((state) => state.consultations.doctors.slice(0, 4));
+  const topProducts = useAppSelector((state) => state.products.products.slice(0, 6));
+  const recentRecords = useAppSelector((state) => state.healthRecords.records.slice(0, 2));
 
   useEffect(() => {
-    loadUsers();
-  }, []);
+    dispatch(fetchDoctors({ page: 1 }));
+    dispatch(fetchProducts({ page: 1 }));
+    dispatch(fetchHealthRecords({ page: 1 }));
+  }, [dispatch]);
 
-  // Re-pull chats every time the Chats tab is focused, so switching back always
-  // shows conversations that arrived while the user was on another tab (and
-  // covers anything the socket missed while backgrounded).
-  useFocusEffect(
-    React.useCallback(() => {
-      dispatch(fetchChats());
-    }, [dispatch])
-  );
-
-  // Live updates (new message, new room) arrive through the socket -> Redux
-  // bridge in services/socketReduxBridge.ts, which keeps state.chat.chats
-  // ordered and unread-counted. No local socket wiring needed here.
-
-  const sortedChats = React.useMemo(() => {
-    return [...chats].sort((a, b) => {
-      const timeA = a.lastMessage?.createdAt
-        ? new Date(a.lastMessage.createdAt).getTime()
-        : a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-      const timeB = b.lastMessage?.createdAt
-        ? new Date(b.lastMessage.createdAt).getTime()
-        : b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-      return timeB - timeA;
-    });
-  }, [chats]);
-
-  const handleOpenChat = (room: IChatRoom) => {
-    dispatch(markRoomRead(room.id));
-    onSelectChat(room);
-  };
-
-  const handleStartChat = async (targetUser: IUser) => {
-    try {
-      const res = await apiClient.post('/chats/direct', { targetUserId: targetUser.id });
-      const room: IChatRoom = res.data.data;
-      setShowNewChatModal(false);
-      onSelectChat(room);
-    } catch (err) {
-      console.error('Error starting direct chat:', err);
-    }
-  };
-
-  const filteredUsers = usersList.filter((u) =>
-    (u.username?.toLowerCase() || '').includes((searchQuery || '').toLowerCase()) ||
-    (u.email?.toLowerCase() || '').includes((searchQuery || '').toLowerCase())
-  );
-
-  const totalUnread = chats.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
-
-  const toggleSelectUserForGroup = (userId: string) => {
-    setSelectedUserIds((prev) =>
-      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
-    );
-  };
-
-  const handleCreateGroupChat = async () => {
-    if (!groupName.trim()) {
-      Alert.alert('Validation Error', 'Please enter a Group Name.');
-      return;
-    }
-    if (selectedUserIds.length === 0) {
-      Alert.alert('Validation Error', 'Please select at least 1 group member.');
-      return;
-    }
-
-    setCreatingGroup(true);
-    try {
-      const res = await apiClient.post('/chats/group', {
-        name: groupName.trim(),
-        memberIds: selectedUserIds,
-        participantIds: selectedUserIds,
-        avatarUrl: `https://api.dicebear.com/7.x/identicon/png?seed=${encodeURIComponent(groupName)}`,
-      });
-      const newRoom: IChatRoom = res.data.data;
-      setShowNewChatModal(false);
-      setIsGroupMode(false);
-      setGroupName('');
-      setSelectedUserIds([]);
-      onSelectChat(newRoom);
-    } catch (err: any) {
-      console.error('Failed to create group chat:', err);
-      Alert.alert('Error', err?.message || 'Could not create group chat.');
-    } finally {
-      setCreatingGroup(false);
-    }
-  };
-
-  const getMessagePreview = (msg: IChatRoom['lastMessage']) => {
-    if (!msg) return 'Tap to start conversation';
-    switch (msg.type) {
-      case 'audio': return '🎤 Voice Note';
-      case 'image': return '📷 Photo';
-      case 'video': return '🎬 Video';
-      case 'file': return '📎 File';
-      default: return msg.content;
-    }
-  };
-
-  const formatChatTime = (dateStr?: string | Date) => {
-    if (!dateStr) return '';
-    try {
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return '';
-      const now = new Date();
-      const diffMs = now.getTime() - d.getTime();
-      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-      if (diffDays === 0) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      if (diffDays === 1) return 'Yesterday';
-      if (diffDays < 7) return d.toLocaleDateString([], { weekday: 'short' });
-      return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    } catch { return ''; }
-  };
-
-  const renderChatItem = ({ item }: { item: IChatRoom }) => {
-    const participantsList = item.participants || [];
-    const otherParticipant = participantsList.find((p) => p.id !== user?.id);
-    const roomTitle = item.isGroup ? (item.name || 'Group') : (otherParticipant?.username || 'Chat');
-
-    // A group used to borrow whichever member happened to be first in the
-    // participant array, so every group wore a random person's face.
-    const avatarUrl = item.isGroup
-      ? `https://api.dicebear.com/7.x/identicon/png?seed=${encodeURIComponent(item.name || item.id)}`
-      : otherParticipant?.avatarUrl;
-
-    const isOnline = item.isGroup
-      ? false
-      : otherParticipant
-        ? onlineUsers.get(otherParticipant.id)
-        : false;
-
-    const hasUnread = (item.unreadCount || 0) > 0;
-
-    // Groups need to say who is in them and who wrote the last line.
-    const memberNames = participantsList
-      .map((p) => (p.id === user?.id ? 'You' : p.username))
-      .join(', ');
-
-    const lastSenderLabel =
-      item.isGroup && item.lastMessage
-        ? item.lastMessage.senderId === user?.id
-          ? 'You: '
-          : `${item.lastMessage.senderName || 'Member'}: `
-        : '';
-
-    return (
-      <TouchableOpacity style={styles.chatCard} onPress={() => handleOpenChat(item)}>
-        <TouchableOpacity
-          onPress={() => !item.isGroup && otherParticipant && onOpenProfile?.(otherParticipant.id)}
-        >
-          <UserAvatar name={roomTitle || 'C'} uri={avatarUrl} size={48} isOnline={isOnline} />
-        </TouchableOpacity>
-
-        <View style={styles.chatDetails}>
-          <View style={styles.chatHeaderRow}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-              {item.isGroup && <Users size={13} color={Colors.textMuted} />}
-              <Text
-                style={[styles.chatTitle, hasUnread && { fontWeight: '800' }, { flexShrink: 1 }]}
-                numberOfLines={1}
-              >
-                {roomTitle}
-              </Text>
-              {item.isGroup && (
-                <Text style={styles.memberCountText}>{participantsList.length}</Text>
-              )}
-            </View>
-            <Text style={[styles.chatTime, hasUnread && { color: Colors.primary, fontWeight: '700' }]}>
-              {item.lastMessage ? formatChatTime(item.lastMessage.createdAt) : ''}
-            </Text>
-          </View>
-
-          <View style={styles.chatPreviewRow}>
-            <Text
-              style={[styles.lastMessageText, hasUnread && { color: Colors.textPrimary, fontWeight: '600' }]}
-              numberOfLines={1}
-            >
-              {lastSenderLabel}
-              {getMessagePreview(item.lastMessage)}
-            </Text>
-            {hasUnread && (
-              <View style={styles.unreadBadge}>
-                <Text style={styles.unreadBadgeText}>{item.unreadCount}</Text>
-              </View>
-            )}
-          </View>
-
-          {item.isGroup && !!memberNames && (
-            <Text style={styles.groupMembersText} numberOfLines={1}>
-              {memberNames}
-            </Text>
-          )}
-        </View>
-      </TouchableOpacity>
-    );
+  const handleHeroPress = (index: number) => {
+    if (index === 0) navigation.navigate('ConsultationsTab');
+    else if (index === 1) navigation.navigate('ShopTab');
+    else navigation.navigate('HealthRecordsTab');
   };
 
   return (
-    <View style={styles.container}>
-      <FlatList
-        data={filteredUsers}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={{ paddingBottom: 30 }}
-        ListHeaderComponent={() => (
+    <View style={[styles.container, { backgroundColor: COLOR.background, paddingTop: insets.top }]}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Top Header */}
+        <View style={styles.topHeader}>
+          <RadialGlowBackground color={COLOR.primary} opacity={0.12} />
           <View>
-            {/* Top Header Bar */}
-            <View style={styles.header}>
-              <View style={styles.userInfoGroup}>
-                <TouchableOpacity onPress={() => user && onOpenProfile?.(user.id)}>
-                  <UserAvatar name={user?.username || 'U'} uri={user?.avatarUrl} size={40} isOnline={true} />
-                </TouchableOpacity>
-                <Text style={styles.userName}>Messages</Text>
-              </View>
+            <Text style={[typography.label, { color: COLOR.accent, textTransform: 'uppercase' }]}>
+              {t('home.welcome')}
+            </Text>
+            <Text style={[typography.title, { color: COLOR.text }]}>
+              {user?.name || 'Aarav Sharma'}
+            </Text>
+          </View>
 
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <TouchableOpacity style={styles.logoutBtn} onPress={() => dispatch(toggleTheme())}>
-                  {isDark ? <Sun size={20} color="#FBBF24" /> : <Moon size={20} color="#6366F1" />}
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.logoutBtn} onPress={() => dispatch(logout())}>
-                  <LogOut size={20} color={Colors.textSecondary} />
-                </TouchableOpacity>
-              </View>
+          <Pressable
+            onPress={() => navigation.navigate('ProfileTab')}
+            accessibilityRole="button"
+            accessibilityLabel="Go to profile"
+            style={[styles.avatarCircle, { backgroundColor: COLOR.surfaceAlt, borderColor: COLOR.border }]}
+          >
+            <Image
+              source={{ uri: user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200' }}
+              style={styles.headerAvatar}
+              accessibilityRole="image"
+              accessibilityLabel={`Profile photo of ${user?.name || 'Aarav Sharma'}`}
+            />
+          </Pressable>
+        </View>
+
+        {/* Z-Axis Hero Banner */}
+        <View style={styles.heroWrapper}>
+          <ZAxisHeroBanner
+            height={220}
+            images={HERO_IMAGES}
+            captions={HERO_CAPTIONS}
+            onPressCaption={handleHeroPress}
+          />
+        </View>
+
+        {/* Dosha Status Bar */}
+        <Pressable
+          onPress={() => navigation.navigate('DoshaQuiz')}
+          accessibilityRole="button"
+          accessibilityLabel={t('home.prakriti_title')}
+          style={[styles.doshaCard, { backgroundColor: COLOR.surface, borderColor: COLOR.border }]}
+        >
+          <View style={[styles.doshaIconCircle, { backgroundColor: COLOR.accentSoft }]}>
+            <Sparkles size={20} color={COLOR.accent} />
+          </View>
+          <View style={{ flex: 1, marginLeft: spacing.md }}>
+            <Text style={[typography.label, { color: COLOR.accent, textTransform: 'uppercase' }]}>
+              {t('home.prakriti_title')}
+            </Text>
+            <Text style={[typography.subtitle, { color: COLOR.text }]}>
+              {patientProfile.dosha ? `${patientProfile.dosha.toUpperCase()} Dominant` : 'Pitta Dominant'}
+            </Text>
+            <Text style={[typography.caption, { color: COLOR.textMuted }]}>
+              {t('home.prakriti_sub')}
+            </Text>
+          </View>
+          <ChevronRight size={18} color={COLOR.textMuted} />
+        </Pressable>
+
+        {/* Quick Action Navigation Grid */}
+        <View style={styles.quickGrid}>
+          <Pressable
+            onPress={() => navigation.navigate('ConsultationsTab')}
+            accessibilityRole="button"
+            accessibilityLabel={t('home.quick_book')}
+            style={[styles.quickTile, { backgroundColor: COLOR.surface, borderColor: COLOR.border }]}
+          >
+            <View style={[styles.tileIcon, { backgroundColor: COLOR.primarySoft }]}>
+              <Stethoscope size={22} color={COLOR.primary} />
             </View>
+            <Text style={[typography.subtitle, { color: COLOR.text, marginTop: spacing.xs }]}>
+              {t('home.quick_book')}
+            </Text>
+            <Text style={[typography.caption, { color: COLOR.textMuted }]}>
+              {t('home.quick_book_sub')}
+            </Text>
+          </Pressable>
 
-            {/* Search Input Bar */}
-            <View style={styles.searchBarContainer}>
-              <Search size={18} color={Colors.textMuted} style={{ marginRight: 8 }} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search chats, contacts, or people..."
-                placeholderTextColor={Colors.textMuted}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-              />
+          <Pressable
+            onPress={() => navigation.navigate('ShopTab')}
+            accessibilityRole="button"
+            accessibilityLabel={t('home.quick_shop')}
+            style={[styles.quickTile, { backgroundColor: COLOR.surface, borderColor: COLOR.border }]}
+          >
+            <View style={[styles.tileIcon, { backgroundColor: COLOR.accentSoft }]}>
+              <ShoppingBag size={22} color={COLOR.accent} />
             </View>
+            <Text style={[typography.subtitle, { color: COLOR.text, marginTop: spacing.xs }]}>
+              {t('home.quick_shop')}
+            </Text>
+            <Text style={[typography.caption, { color: COLOR.textMuted }]}>
+              {t('home.quick_shop_sub')}
+            </Text>
+          </Pressable>
 
-            {/* Recent Conversations List */}
-            <View style={styles.chatsListSection}>
-              <View style={styles.chatsListHeader}>
-                <Text style={styles.sectionLabel}>Recent Conversations</Text>
-                <TouchableOpacity onPress={() => setShowNewChatModal(true)}>
-                  <MessageSquarePlus size={22} color={Colors.primary} />
-                </TouchableOpacity>
-              </View>
+          <Pressable
+            onPress={() => navigation.navigate('HealthRecordsTab')}
+            accessibilityRole="button"
+            accessibilityLabel={t('home.quick_vault')}
+            style={[styles.quickTile, { backgroundColor: COLOR.surface, borderColor: COLOR.border }]}
+          >
+            <View style={[styles.tileIcon, { backgroundColor: COLOR.infoSoft }]}>
+              <FileText size={22} color={COLOR.info} />
+            </View>
+            <Text style={[typography.subtitle, { color: COLOR.text, marginTop: spacing.xs }]}>
+              {t('home.quick_vault')}
+            </Text>
+            <Text style={[typography.caption, { color: COLOR.textMuted }]}>
+              {t('home.quick_vault_sub')}
+            </Text>
+          </Pressable>
+        </View>
 
-              {/* Spinner only while the list is genuinely empty — a background
-                  refresh must never blank out chats that are already on screen. */}
-              {loadingChats && sortedChats.length === 0 ? (
-                <ActivityIndicator color={Colors.primary} style={{ marginVertical: 20 }} />
-              ) : sortedChats.length === 0 ? (
-                <View style={{ paddingVertical: 12, paddingHorizontal: 20, alignItems: 'center' }}>
-                  <Text style={{ color: Colors.textMuted, fontSize: 13, textAlign: 'center' }}>
-                    No active chats yet. Start a conversation with registered users below!
+        {/* Available Doctors Section */}
+        <View style={styles.sectionContainer}>
+          <SectionHeader
+            title={t('home.senior_doctors')}
+            buttonText={t('home.see_all_doctors')}
+            onPress={() => navigation.navigate('ConsultationsTab')}
+            description={t('home.senior_doctors_desc')}
+          />
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalRow}>
+            {topDoctors.map((doc) => (
+              <Pressable
+                key={doc.id}
+                onPress={() => navigation.navigate('DoctorDetail', { doctorId: doc.id })}
+                accessibilityRole="button"
+                accessibilityLabel={`${doc.name}, ${doc.specialty}`}
+                style={[styles.horizontalDoctorCard, { backgroundColor: COLOR.surface, borderColor: COLOR.border }]}
+              >
+                <Image
+                  source={{ uri: doc.photo }}
+                  style={styles.docImg}
+                  accessibilityRole="image"
+                  accessibilityLabel={`Photo of ${doc.name}`}
+                />
+                <Text style={[typography.subtitle, { color: COLOR.text, marginTop: spacing.xs }]} numberOfLines={1}>
+                  {doc.name}
+                </Text>
+                <Text style={[typography.caption, { color: COLOR.primary, fontWeight: '700' }]} numberOfLines={1}>
+                  {doc.specialty}
+                </Text>
+                <Text style={[typography.caption, { color: COLOR.textMuted }]} numberOfLines={1}>
+                  ₹{doc.consultationFee} · {doc.yearsExperience} yrs exp
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+
+        {/* Best Seller Remedies Section */}
+        <View style={styles.sectionContainer}>
+          <SectionHeader
+            title={t('home.featured_remedies')}
+            buttonText={t('home.visit_shop')}
+            onPress={() => navigation.navigate('ShopTab')}
+            description={t('home.featured_remedies_desc')}
+          />
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalRow}>
+            {topProducts.map((prod) => (
+              <Pressable
+                key={prod.id}
+                onPress={() => navigation.navigate('ProductDetail', { productId: prod.id })}
+                accessibilityRole="button"
+                accessibilityLabel={`${prod.name}, ₹${prod.price}`}
+                style={[styles.horizontalProductCard, { backgroundColor: COLOR.surface, borderColor: COLOR.border }]}
+              >
+                <Image
+                  source={{ uri: prod.image }}
+                  style={styles.prodImg}
+                  accessibilityRole="image"
+                  accessibilityLabel={prod.name}
+                />
+                <Text style={[typography.caption, { color: COLOR.primary, fontWeight: '800', marginTop: spacing.xs }]} numberOfLines={1}>
+                  {prod.category}
+                </Text>
+                <Text style={[typography.subtitle, { color: COLOR.text, fontSize: 13 }]} numberOfLines={2}>
+                  {prod.name}
+                </Text>
+                <Text style={[typography.subtitle, { color: COLOR.text, fontWeight: '800', marginTop: 4 }]}>
+                  ₹{prod.price}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+
+        {/* Recent Health Records */}
+        <View style={[styles.sectionContainer, { marginBottom: 60 }]}>
+          <SectionHeader
+            title={t('home.recent_records')}
+            buttonText={t('home.full_timeline')}
+            onPress={() => navigation.navigate('HealthRecordsTab')}
+            description={t('home.recent_records_desc')}
+          />
+
+          {recentRecords.map((rec) => (
+            <Card key={rec.id} style={{ marginBottom: spacing.xs + 2 }}>
+              <Pressable
+                onPress={() => navigation.navigate('RecordDetail', { recordId: rec.id })}
+                accessibilityRole="button"
+                accessibilityLabel={`${rec.title}, ${rec.doctorName}`}
+                style={styles.recordRow}
+              >
+                <View style={[styles.recordIconBox, { backgroundColor: COLOR.primarySoft }]}>
+                  <FileText size={18} color={COLOR.primary} />
+                </View>
+                <View style={{ flex: 1, marginLeft: spacing.md }}>
+                  <Text style={[typography.subtitle, { color: COLOR.text, fontSize: 14 }]} numberOfLines={1}>
+                    {rec.title}
+                  </Text>
+                  <Text style={[typography.caption, { color: COLOR.textMuted }]}>
+                    {rec.doctorName} · {new Date(rec.date).toLocaleDateString()}
                   </Text>
                 </View>
-              ) : (
-                <View>
-                  {sortedChats.map((chatItem) => (
-                    <React.Fragment key={chatItem.id}>
-                      {renderChatItem({ item: chatItem })}
-                    </React.Fragment>
-                  ))}
-                </View>
-              )}
-            </View>
-
-            {/* Registered App Users Section Header */}
-            <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 }}>
-              <Text style={styles.sectionLabel}>Registered App Users & Community</Text>
-            </View>
-          </View>
-        )}
-        renderItem={({ item }) => {
-          const isOnline = onlineUsers.get(item.id) ?? item.isOnline;
-          return (
-            <View style={{ paddingHorizontal: 20 }}>
-              <View style={styles.modalUserCard}>
-                <TouchableOpacity onPress={() => onOpenProfile?.(item.id)}>
-                  <UserAvatar name={item.username} uri={item.avatarUrl} size={44} isOnline={isOnline} />
-                </TouchableOpacity>
-
-                <TouchableOpacity style={{ flex: 1 }} onPress={() => onOpenProfile?.(item.id)}>
-                  <Text style={styles.modalUserName}>{item.username}</Text>
-                  <Text style={{ color: Colors.textMuted, fontSize: 12 }}>{item.email}</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={{ backgroundColor: Colors.primary, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
-                  onPress={() => handleStartChat(item)}
-                >
-                  <MessageSquarePlus size={16} color="#FFFFFF" />
-                  <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>Chat</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          );
-        }}
-      />
-
-      {/* Start New Chat & Group Modal */}
-      <Modal visible={showNewChatModal} animationType="slide" transparent>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalContent}>
-            {/* Modal Header Tabs */}
-            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
-              <TouchableOpacity
-                style={{
-                  flex: 1,
-                  paddingVertical: 10,
-                  borderRadius: 10,
-                  alignItems: 'center',
-                  backgroundColor: !isGroupMode ? Colors.primary : 'rgba(255,255,255,0.08)',
-                }}
-                onPress={() => setIsGroupMode(false)}
-              >
-                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>Direct Message</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={{
-                  flex: 1,
-                  paddingVertical: 10,
-                  borderRadius: 10,
-                  alignItems: 'center',
-                  backgroundColor: isGroupMode ? Colors.primary : 'rgba(255,255,255,0.08)',
-                }}
-                onPress={() => setIsGroupMode(true)}
-              >
-                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>+ Create Group</Text>
-              </TouchableOpacity>
-            </View>
-
-            {isGroupMode && (
-              <TextInput
-                style={[
-                  styles.searchInput,
-                  {
-                    backgroundColor: Colors.inputBackground,
-                    borderColor: Colors.inputBorder,
-                    borderWidth: 1,
-                    borderRadius: 12,
-                    paddingHorizontal: 14,
-                    height: 44,
-                    marginBottom: 12,
-                    color: Colors.textPrimary,
-                  },
-                ]}
-                placeholder="Group Name (e.g. Project Pulse Team)"
-                placeholderTextColor={Colors.textMuted}
-                value={groupName}
-                onChangeText={setGroupName}
-              />
-            )}
-
-            <FlatList
-              data={usersList}
-              keyExtractor={(item) => item.id}
-              style={{ maxHeight: 280 }}
-              renderItem={({ item }) => {
-                const isSelected = selectedUserIds.includes(item.id);
-                return (
-                  <TouchableOpacity
-                    style={[
-                      styles.modalUserCard,
-                      isSelected && { backgroundColor: 'rgba(99, 102, 241, 0.15)', borderRadius: 12 },
-                    ]}
-                    onPress={() => {
-                      if (isGroupMode) {
-                        toggleSelectUserForGroup(item.id);
-                      } else {
-                        handleStartChat(item);
-                      }
-                    }}
-                  >
-                    <UserAvatar name={item.username} uri={item.avatarUrl} size={40} isOnline={onlineUsers.get(item.id)} />
-                    <Text style={[styles.modalUserName, { flex: 1 }]}>{item.username}</Text>
-                    {isGroupMode && (
-                      <View
-                        style={{
-                          width: 22,
-                          height: 22,
-                          borderRadius: 11,
-                          borderWidth: 2,
-                          borderColor: isSelected ? Colors.primary : Colors.textMuted,
-                          backgroundColor: isSelected ? Colors.primary : 'transparent',
-                          justifyContent: 'center',
-                          alignItems: 'center',
-                        }}
-                      >
-                        {isSelected && <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: 'bold' }}>✓</Text>}
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              }}
-            />
-
-            {isGroupMode ? (
-              <TouchableOpacity
-                style={[styles.startNewBtn, { marginTop: 14, alignItems: 'center' }]}
-                onPress={handleCreateGroupChat}
-                disabled={creatingGroup}
-              >
-                {creatingGroup ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.startNewBtnText}>Create Group Chat ({selectedUserIds.length})</Text>
-                )}
-              </TouchableOpacity>
-            ) : null}
-
-            <TouchableOpacity
-              style={styles.closeModalBtn}
-              onPress={() => {
-                setShowNewChatModal(false);
-                setIsGroupMode(false);
-                setGroupName('');
-                setSelectedUserIds([]);
-              }}
-            >
-              <Text style={styles.closeModalText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
+                <ChevronRight size={16} color={COLOR.textMuted} />
+              </Pressable>
+            </Card>
+          ))}
         </View>
-      </Modal>
-
+      </ScrollView>
     </View>
   );
 };
@@ -503,212 +313,112 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onSelectChat, onOpenProf
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
-    paddingTop: 12
   },
-  header: {
+  scrollContent: {
+    paddingBottom: 40,
+  },
+  topHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 12
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
   },
-  userInfoGroup: {
+  avatarCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1.5,
+    overflow: 'hidden',
+  },
+  headerAvatar: {
+    width: '100%',
+    height: '100%',
+  },
+  heroWrapper: {
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.xs,
+  },
+  doshaCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12
-  },
-  userGreeting: {
-    color: Colors.textMuted,
-    fontSize: 12
-  },
-  userName: {
-    color: Colors.textPrimary,
-    fontSize: 22,
-    fontWeight: '800'
-  },
-  logoutBtn: {
-    padding: 8
-  },
-  searchBarContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.inputBackground,
-    marginHorizontal: 20,
-    marginVertical: 10,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    height: 46,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: Colors.inputBorder
   },
-  searchInput: {
-    flex: 1,
-    color: Colors.textPrimary,
-    fontSize: 14
-  },
-  contactsSection: {
-    paddingLeft: 20,
-    marginVertical: 12
-  },
-  sectionLabel: {
-    color: Colors.textSecondary,
-    fontSize: 13,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 12
-  },
-  contactAvatarItem: {
-    alignItems: 'center',
-    marginRight: 16,
-    width: 60
-  },
-  contactName: {
-    color: Colors.textPrimary,
-    fontSize: 11,
-    marginTop: 6,
-    textAlign: 'center'
-  },
-  chatsListSection: {
-    flex: 1,
-    paddingHorizontal: 20,
-    marginTop: 8
-  },
-  chatsListHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8
-  },
-  chatCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.cardBackground,
-    padding: 14,
-    borderRadius: 16,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: Colors.cardBorder
-  },
-  chatDetails: {
-    flex: 1,
-    marginLeft: 14
-  },
-  chatHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4
-  },
-  chatTitle: {
-    color: Colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '700'
-  },
-  chatTime: {
-    color: Colors.textMuted,
-    fontSize: 11
-  },
-  lastMessageText: {
-    color: Colors.textSecondary,
-    fontSize: 13,
-    flex: 1
-  },
-  chatPreviewRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8
-  },
-  memberCountText: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 8,
-    overflow: 'hidden'
-  },
-  groupMembersText: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    marginTop: 3
-  },
-  unreadBadge: {
-    backgroundColor: Colors.primary,
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 5
-  },
-  unreadBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '800'
-  },
-  emptyContainer: {
+  doshaIconCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 60,
-    gap: 12
   },
-  emptyText: {
-    color: Colors.textMuted,
-    fontSize: 14
+  quickGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.md,
   },
-  startNewBtn: {
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 12
+  quickTile: {
+    width: '31%',
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    alignItems: 'center',
   },
-  startNewBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '600'
+  tileIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end'
+  sectionContainer: {
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.md,
   },
-  modalContent: {
-    backgroundColor: Colors.cardBackground,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-    maxHeight: '70%'
+  horizontalRow: {
+    paddingVertical: spacing.xs,
   },
-  modalTitle: {
-    color: Colors.textPrimary,
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 16
+  horizontalDoctorCard: {
+    width: 140,
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    marginRight: spacing.sm,
+    alignItems: 'center',
   },
-  modalUserCard: {
+  docImg: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#EEF3EA',
+  },
+  horizontalProductCard: {
+    width: 140,
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    marginRight: spacing.sm,
+  },
+  prodImg: {
+    width: '100%',
+    height: 90,
+    borderRadius: radius.sm,
+    backgroundColor: '#EEF3EA',
+  },
+  recordRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.cardBorder,
-    gap: 12
   },
-  modalUserName: {
-    color: Colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '600'
-  },
-  closeModalBtn: {
-    marginTop: 16,
-    paddingVertical: 14,
+  recordIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 12
+    justifyContent: 'center',
   },
-  closeModalText: {
-    color: Colors.textSecondary,
-    fontWeight: '600'
-  }
 });

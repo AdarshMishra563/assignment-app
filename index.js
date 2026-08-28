@@ -20,3 +20,9 @@ try {
 }
 
 AppRegistry.registerComponent(appName, () => App);
+if (appName !== 'PulseChatApp') {
+  AppRegistry.registerComponent('PulseChatApp', () => App);
+}
+if (appName !== 'AmrutamPharmaApp') {
+  AppRegistry.registerComponent('AmrutamPharmaApp', () => App);
+}
